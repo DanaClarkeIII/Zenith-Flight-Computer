@@ -4,6 +4,7 @@
 #define rst 23
 #define dio0 6
 
+String toSend;
 String lastSent = "";
 bool waitingForAck = false;
 unsigned long lastSendTime = 0;
@@ -12,8 +13,6 @@ int sendAttempts = 0;
 void setup() {
   Serial.begin(9600);
   while (!Serial);
-
-  Serial.println("LoRa Transceiver");
 
   LoRa.setPins(ss, rst, dio0);
   
@@ -30,7 +29,6 @@ void loop() {
 
   // if we're not waiting for an acknowledgement, send a new message
   if (!waitingForAck) {
-    String toSend = "Hello, world!";
     send(toSend);
     lastSent = toSend;
     waitingForAck = true;
@@ -38,8 +36,8 @@ void loop() {
     sendAttempts = 1;
   }
   // if we are waiting for an acknowledgement, check if the timeout has expired
-  else if (millis() - lastSendTime > 2000) { // 2 second timeout
-    if (sendAttempts < 5) { // limit of 5 retransmission attempts
+  else if (millis() - lastSendTime > 1000) { // 1 second timeout
+    if (sendAttempts < 2) { // limit of 2 retransmission attempts
       // if the timeout has expired and we haven't reached the retransmission limit, resend the last message
       send(lastSent);
       lastSendTime = millis();
@@ -71,11 +69,20 @@ void checkForPackets() {
       Serial.println(LoRa.packetRssi());
       if (received == "NACK") {
         // if we received a NACK, resend the last message
-        send(lastSent);
-        lastSendTime = millis();
+        if (nackCount < 2) { // limit of 2 consecutive NACK messages
+          send(lastSent);
+          lastSendTime = millis();
+          nackCount++;
+        } else {
+          // if we've reached the NACK limit, give up on this message
+          waitingForAck = false;
+          nackCount = 0;
+          Serial.println("Too many consecutive NACKs, giving up on message");
+        }
       } else if (received == "ACK") {
         // if we received an ACK, we can send the next message
         waitingForAck = false;
+        nackCount = 0;
       }
     } else {
       Serial.println("Checksum mismatch, sending NACK");
